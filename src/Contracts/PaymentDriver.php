@@ -29,9 +29,12 @@ interface PaymentDriver
     public function supportsRefunds(): bool;
 
     /**
+     * Whether the provider can be asked for the current state of a payment.
+     */
+    public function supportsRetrieval(): bool;
+
+    /**
      * Initiate a payment session with the provider.
-     *
-     * Returns the data needed by the frontend (client_secret, order_id, etc.).
      *
      * @param  array<string, mixed>  $context
      */
@@ -50,9 +53,7 @@ interface PaymentDriver
     public function capturePayment(string $reference, ?int $amount = null): PaymentResult;
 
     /**
-     * Refund a captured payment (full or partial). A caller-supplied
-     * `idempotency_key` in the context must make a retried refund collapse
-     * into a single refund at the gateway.
+     * Refund a captured payment (full or partial).
      *
      * @param  array<string, mixed>  $context
      */
