@@ -122,6 +122,10 @@ final class PaymentProcessingService
             );
         }
 
+        if (in_array($order->status, [OrderStatus::Cancelled, OrderStatus::Archived], strict: true)) {
+            throw PaymentException::captureNotAllowed($order->status->value);
+        }
+
         $paymentMethod = $order->paymentMethod;
         $driver = $this->resolveDriver($paymentMethod);
 
@@ -266,13 +270,7 @@ final class PaymentProcessingService
             return;
         }
 
-        $campaign = $order->discount?->campaign;
-
-        if ($campaign === null) {
-            return;
-        }
-
-        resolve(ReleaseCampaignBudget::class)->execute($campaign, $order->getKey(), actor: 'order-refunded');
+        resolve(ReleaseCampaignBudget::class)->releaseOrder($order->getKey(), actor: 'order-refunded');
     }
 
     private function resolveDriver(PaymentMethod $method): PaymentDriver
