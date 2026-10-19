@@ -21,6 +21,11 @@ return [
     | the cart it paid for is completed when it can be, otherwise the orphan
     | is reported, and given back to the customer when `orphans` is "refund".
     |
+    | `orphan_filter` names a class implementing
+    | Shopper\Payment\Contracts\OrphanFilter: a candidate it refuses is
+    | skipped before any branch of the reconciliation and left unmarked.
+    | Left null, every candidate is handled.
+    |
     */
 
     'reconciliation' => [
@@ -31,6 +36,21 @@ return [
         'prune_after_days' => env('PAYMENT_WEBHOOK_EVENTS_PRUNE_AFTER_DAYS', 90),
         'orphan_after_minutes' => env('PAYMENT_ORPHAN_AFTER_MINUTES', 30),
         'orphans' => env('PAYMENT_ORPHANS', 'alert'),
+        'orphan_filter' => null,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Compensation Store
+    |--------------------------------------------------------------------------
+    |
+    | A class implementing Shopper\Payment\Contracts\CompensationStore. The
+    | decision to give a payment back is recorded there before the provider
+    | is called, and a cart whose payment is being given back is never
+    | completed into an order. Left null, nothing is recorded.
+    |
+    */
+
+    'compensation_store' => null,
 
 ];

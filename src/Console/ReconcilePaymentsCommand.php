@@ -14,8 +14,11 @@ use Shopper\Core\Events\Payments\PaymentOrphaned;
 use Shopper\Core\Models\Contracts\Order as OrderContract;
 use Shopper\Core\Models\Order;
 use Shopper\Payment\Actions\SettlePayment;
+use Shopper\Payment\Contracts\OrphanFilter;
 use Shopper\Payment\Enum\TransactionType;
 use Shopper\Payment\Enum\WebhookAction;
+use Shopper\Payment\Events\OrphanLeftUnresolved;
+use Shopper\Payment\Events\OrphanSettled;
 use Shopper\Payment\Exceptions\PaymentException;
 use Shopper\Payment\Jobs\SyncPendingPaymentJob;
 use Shopper\Payment\Models\PaymentTransaction;
@@ -98,8 +101,13 @@ final class ReconcilePaymentsCommand extends Command
             ->groupBy('reference');
 
         $seen = [];
+        $filter = $this->orphanFilter();
 
         foreach ($candidates->lazyByIdDesc() as $event) {
+            if ($filter !== null && ! $filter->accepts($event)) {
+                continue;
+            }
+
             /** @var string $reference */
             $reference = $event->reference;
 
@@ -113,8 +121,11 @@ final class ReconcilePaymentsCommand extends Command
             $returned = $returns->get($reference);
 
             if ($returned !== null) {
-                if ($cartId !== null && $returned->doesntContain('type', WebhookAction::Canceled) && PaymentWebhookEvent::refundedAmount($returned) < (int) $result->amount) {
+                $refunded = PaymentWebhookEvent::refundedAmount($returned);
+
+                if ($cartId !== null && $returned->doesntContain('type', WebhookAction::Canceled) && $refunded < (int) $result->amount) {
                     report(PaymentException::orphaned($event->driver, $reference));
+                    event(new OrphanLeftUnresolved($event->driver, $reference, $result->amount, $refunded, OrphanLeftUnresolved::PARTIAL_REFUND));
                     $orphaned++;
                 }
 
@@ -128,22 +139,41 @@ final class ReconcilePaymentsCommand extends Command
             try {
                 event($orphan);
 
-                if ($orphan->deferred || $payments->findOrderByReference($reference) !== null) {
+                if ($orphan->deferred) {
+                    event(new OrphanLeftUnresolved($event->driver, $reference, $result->amount, 0, OrphanLeftUnresolved::DEFERRED));
+
                     continue;
                 }
 
-                if ($orphan->recognized && ! $orphan->resolved) {
+                if ($payments->findOrderByReference($reference) !== null) {
+                    event(new OrphanSettled($event->driver, $reference, OrphanSettled::ORDER));
+
+                    continue;
+                }
+
+                if (! $orphan->recognized) {
+                    event(new OrphanLeftUnresolved($event->driver, $reference, $result->amount, 0, OrphanLeftUnresolved::UNRECOGNIZED));
+                } elseif ($orphan->resolved) {
+                    event(new OrphanSettled($event->driver, $reference, OrphanSettled::REFUNDED));
+                } else {
                     report(PaymentException::orphaned($event->driver, $reference));
 
-                    if (config('shopper.payment.reconciliation.orphans') === 'refund') {
-                        $refunded = $gateway->refund(['driver' => $event->driver, 'reference' => $reference, 'amount' => $result->amount]);
+                    $refunded = false;
 
-                        if (! $refunded && $paymentManager->driver($event->driver)->supportsRetrieval()) {
-                            continue;
-                        }
+                    if (config('shopper.payment.reconciliation.orphans') === 'refund') {
+                        $refunded = $gateway->refund(['driver' => $event->driver, 'reference' => $reference, 'amount' => $result->amount, 'cause' => 'orphan']);
 
                         if ($refunded) {
                             event(new OrphanedPaymentRefunded($event->driver, $reference));
+                            event(new OrphanSettled($event->driver, $reference, OrphanSettled::REFUNDED));
+                        }
+                    }
+
+                    if (! $refunded) {
+                        event(new OrphanLeftUnresolved($event->driver, $reference, $result->amount, 0, OrphanLeftUnresolved::NOT_RESOLVED));
+
+                        if (config('shopper.payment.reconciliation.orphans') === 'refund' && $paymentManager->driver($event->driver)->supportsRetrieval()) {
+                            continue;
                         }
                     }
 
@@ -151,6 +181,7 @@ final class ReconcilePaymentsCommand extends Command
                 }
             } catch (Throwable $exception) {
                 report($exception);
+                event(new OrphanLeftUnresolved($event->driver, $reference, $result->amount, 0, OrphanLeftUnresolved::HANDLER_FAILED));
 
                 continue;
             }
@@ -159,6 +190,13 @@ final class ReconcilePaymentsCommand extends Command
         }
 
         return $orphaned;
+    }
+
+    private function orphanFilter(): ?OrphanFilter
+    {
+        $filter = config('shopper.payment.reconciliation.orphan_filter');
+
+        return is_string($filter) && $filter !== '' ? app($filter) : null;
     }
 
     private function queuePendingPayments(int $minutes): int

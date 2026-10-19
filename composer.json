@@ -11,12 +11,22 @@
     "illuminate/database": "^12.68|^13.27",
     "illuminate/queue": "^12.68|^13.27",
     "illuminate/support": "^12.68|^13.27",
-    "shopper/core": "self.version"
+    "shopper/core": "3.0.0-rc.3"
+  },
+  "require-dev": {
+    "orchestra/testbench": "^10.0|^11.0",
+    "pestphp/pest": "^3.8|^4.0",
+    "pestphp/pest-plugin-laravel": "^3.0|^4.0"
   },
   "autoload": {
     "psr-4": {
       "Shopper\\Payment\\": "src/",
       "Shopper\\Payment\\Database\\Factories\\": "database/factories"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Shopper\\Payment\\Tests\\": "tests/"
     }
   },
   "extra": {
@@ -27,7 +37,10 @@
     }
   },
   "config": {
-    "sort-packages": true
+    "sort-packages": true,
+    "allow-plugins": {
+      "pestphp/pest-plugin": true
+    }
   },
   "minimum-stability": "dev",
   "prefer-stable": true
